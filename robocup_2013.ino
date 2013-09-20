@@ -47,11 +47,13 @@ const int RS_PRIO[] = { 2,   1,   3,   0,   4 };
 // --------------------------   GLOBALS   -------------------------------------
 int state = 0;                           //                   the current state
 float cur_speed = 1;                     //                   the current speed
+byte cur_spd_dir = 255;                  //             the current break state
 int sv_analog[] = {0, 0, 0, 0, 0};       //               sensor values: analog
 boolean sv[] = {0, 0, 0, 0, 0};          // sensor values:   boolean (is black)
 boolean sv_prev[] = {0, 0, 0, 0, 0};     // sensor values:     boolean previous
 boolean sv_pprev[] = {0, 0, 0, 0, 0};    // sensor values:    boolean prev prev
 boolean sv_lworking[] = {0, 0, 0, 0, 0}; // sensor values: boolean last working
+
 
 // some loop indices
 int i, index;
@@ -69,14 +71,6 @@ void setup() {
   pinMode(P_ENG_RIGH_SPD, OUTPUT);
   pinMode(P_ENG_LEFT_BRK, OUTPUT);
   pinMode(P_ENG_RIGH_BRK, OUTPUT);
-
-  // don't break at start
-  digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_OFF);
-  digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_OFF);
-
-  // set direction
-  digitalWrite(P_ENG_LEFT_DIR, ENG_DIR_FORW);
-  digitalWrite(P_ENG_RIGH_DIR, ENG_DIR_FORW);
 
 #if MY_DEBUG == 1
   Serial.begin(9600);  // DEBUG: Starts the serial monitor.
@@ -118,11 +112,26 @@ void write_sensors() {
   this we enable the engines to drive. Therefore this
   function could only be called on state changes.
 */
-void drive(byte spd_dir_index){
+void drive(byte spd_dir_index, float speed){
+  // If this function is called with same parameters twice
+  // one does not need to change the values.
+  if (cur_spd_dir == spd_dir_index && cur_speed == speed){
+    return;
+  }
+
   // Get engine speed values for the given index.
   const int* dir = ENG_SPD_DIR[spd_dir_index];
-  int left = dir[0] * cur_speed;
-  int right = dir[1] * cur_speed;
+  int left = dir[0] * speed;
+  int right = dir[1] * speed;
+
+  // If speed less then zero than break.
+  if (speed <= 0) {
+    digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_ON);
+    digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_ON);
+  } else {
+    digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_OFF);
+    digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_OFF);
+  }
 
   // The left and right values now may be in the range [-255, 255],
   // which will not directly work for the analog write. Therefore
@@ -133,6 +142,9 @@ void drive(byte spd_dir_index){
 
   analogWrite(P_ENG_RIGH_SPD, abs(right));
   digitalWrite(P_ENG_RIGH_DIR, (right >= 0) ? ENG_DIR_FORW : ENG_DIR_BACK);
+
+  cur_spd_dir = spd_dir_index;
+  cur_speed = speed;
 }
 
 /*
@@ -165,9 +177,7 @@ boolean one_black(){
 */
 void find_line_first(){
   // set dircetion to straight forward
-  digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_OFF);
-  digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_OFF);
-  drive(2);
+  drive(2, SPD_DEF);
   if (one_black()){
     state = 1;
   }
@@ -181,32 +191,25 @@ void find_line_first(){
   If no sensor reacts, the state machine goes back to STATE:0 .
 */
 void follow_mid_sensor(){
-  digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_OFF);
-  digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_OFF);
-
   for (i=0; i<5; i++){
     index = RS_PRIO[i];
     if (sv[index]) {
-      drive(index);
+      drive(index, SPD_DEF);
       return;
     }
   }
-// If non of the RS values were true
-// the robot did not see a line.
-// Now we check how the previous sensor values
-// were set. Therefore we save the last working
-// sv array.
-//  for (i=0; i<5; i++){
-//    sv_lworking[i] = sv_prev[i];
-//  }
-// And switch into the next state :)
-
+// If non of the RS values were true the robot did not see a line.
+// Now we check how the previous sensor values were set.
+// And switch therefore into the next state :)
   state = 2;
 }
 
 /*
   STATE:2
-  ... in progress ..
+  This should check the last working sensor values and drive
+  into that directions that found a black vlaue. Here we switch
+  the priorities so that the outter sernsor values have a higher
+  priority than the middle sensor.
 */
 void check_last_working(){
 //  First check whether we are back on track
@@ -220,26 +223,22 @@ void check_last_working(){
   for (i=4; i>=0; i--){
     index = RS_PRIO[i];
     if (sv_lworking[index]) {
-      drive(index);
+      drive(index, SPD_DEF);
       return;
     }
   }
 
 // If none of the last_working values was set
-// go back to state 1.
+// go back to the first state.
   state = 0;
 }
 
 /*
   STATE:3
-  Stops the robot.
+  Stops the robot and changes state to follow mid sensor.
 */
 void stop_bot(){
-  cur_speed = SPD_OFF;
-  drive(2);
-  digitalWrite(P_ENG_LEFT_BRK, ENG_BREAK_ON);
-  digitalWrite(P_ENG_RIGH_BRK, ENG_BREAK_ON);
-  // set state to 0
+  drive(2, SPD_OFF);
   state = 1;
 }
 
@@ -260,7 +259,6 @@ void loop() {
       sv_lworking[i] = sv[i];
     }
   }
-  cur_speed = SPD_DEF;
 
 #if MY_DEBUG == 1
   write_sensors(); // DEBUG: prints all sensor values to the serial monitor
@@ -284,3 +282,4 @@ void loop() {
       break;
   }
 }
+
