@@ -1,4 +1,4 @@
-robocub_2013
+robocup_2013
 ============
 
 Arduino code for RoboCup rescue
