@@ -5,6 +5,7 @@
 // --------------------------   DEFINITONS   ----------------------------------
 // :: DEBUG ::
 #define MY_DEBUG 0     // set this to 1, to activate debug print out to the sm.
+#define WRITE_SAMPLE_RATE 1000 // DEBUG PRINT OUT SAMPLE RATE
 
 // :: ENGINE ::
 // Pin layout
@@ -43,6 +44,8 @@ const int RS_TH[] = { 650, 650, 650, 650, 650 };
 // Priorites of the sensors in ``normal`` mode.
 const int RS_PRIO[] = { 2,   1,   3,   0,   4 };
 
+// Sample rate for historical values
+#define RS_SAMPLE_RATE 100
 
 // --------------------------   GLOBALS   -------------------------------------
 int state = 0;                           //                   the current state
@@ -53,10 +56,12 @@ boolean sv[] = {0, 0, 0, 0, 0};          // sensor values:   boolean (is black)
 boolean sv_prev[] = {0, 0, 0, 0, 0};     // sensor values:     boolean previous
 boolean sv_pprev[] = {0, 0, 0, 0, 0};    // sensor values:    boolean prev prev
 boolean sv_lworking[] = {0, 0, 0, 0, 0}; // sensor values: boolean last working
+unsigned long sv_history[] = {0, 0, 0, 0, 0};     // sensor values:    historical values
 
 
 // some loop indices
 int i, index;
+long loop_count = 0;
 
 
 // --------------------------   ROUTINES   ------------------------------------
@@ -83,6 +88,7 @@ void setup() {
   value is over threshold.
 */
 void read_sensors() {
+  loop_count++;
   for (i=0; i<5; i++){
     // Reads the analog values.
     sv_analog[i] = analogRead(P_RS_VL[i]);
@@ -91,17 +97,26 @@ void read_sensors() {
     sv_prev[i] = sv[i];
     // Saves the current state.
     sv[i] = (sv_analog[i] >= RS_TH[i]) ? true : false;
+    // sample historical values
+    if ((loop_count % RS_SAMPLE_RATE) == 0){
+      sv_history[i] = (sv_history[i] << 1) | sv[i];
+    }
   }
 }
 
 #if MY_DEBUG == 1
 /* DEBUG: print out all senser values */
 void write_sensors() {
+  if (loop_count % WRITE_SAMPLE_RATE){
+    return;
+  }
   for (i=0; i<5; i++){
     Serial.print(i); Serial.print(": ");
     Serial.print(sv_analog[i]);
     Serial.print(" {"); Serial.print(sv[i]); Serial.print("}\t");
+    Serial.print(" H{"); Serial.print(sv_history[i]); Serial.print("}\t");
   }
+  Serial.print("Loops: "); Serial.print(loop_count); Serial.print("\t");
   Serial.print("\n");
 }
 #endif
@@ -171,6 +186,31 @@ boolean one_black(){
 }
 
 /*
+  Get the tendancy of the sv_history
+*/
+byte get_tendancy(){
+  byte counter[] = {0, 0, 0, 0, 0};
+  int i,j;
+  for (i=0; i<sizeof(long); i++) {
+    for (j=0; j<5; j++) {
+      counter[j] += ((sv_history[j] >> i) & true) ? 1 : 0;
+      if (counter[0] && counter[1]) {
+        return 0;
+      } else if (counter[4] && counter[3]) {
+        return 4;
+      }
+    }
+  }
+  if (counter[1] && counter[2] && counter[1] > counter[2]) {
+    return 1;
+  } else if (counter[3] && counter[2] && counter[3] > counter[2]) {
+    return 3;
+  } else {
+    return 2;
+  }
+}
+
+/*
   STATE:0
   Constantly drives forward until at least one of the
   sensors registers a black value.
@@ -220,13 +260,13 @@ void check_last_working(){
 
 //  Otherwise head into the last working direction
 //  with vice-versa priorities.
-  for (i=4; i>=0; i--){
-    index = RS_PRIO[i];
-    if (sv_lworking[index]) {
-      drive(index, SPD_DEF);
-      return;
-    }
-  }
+  // for (i=4; i>=0; i--){
+    // index = RS_PRIO[i];
+    // if (sv_lworking[index]) {
+  drive(get_tendancy(), SPD_DEF);
+  return;
+    // }
+  // }
 
 // If none of the last_working values was set
 // go back to the first state.
