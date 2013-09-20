@@ -59,8 +59,7 @@ boolean sv_lworking[] = {0, 0, 0, 0, 0}; // sensor values: boolean last working
 unsigned long sv_history[] = {0, 0, 0, 0, 0};     // sensor values:    historical values
 
 
-// some loop indices
-int i, index;
+// some counters
 long loop_count = 0;
 
 
@@ -89,7 +88,7 @@ void setup() {
 */
 void read_sensors() {
   loop_count++;
-  for (i=0; i<5; i++){
+  for (byte i=0; i<5; i++){
     // Reads the analog values.
     sv_analog[i] = analogRead(P_RS_VL[i]);
     // Saves previous states.
@@ -110,7 +109,7 @@ void write_sensors() {
   if (loop_count % WRITE_SAMPLE_RATE){
     return;
   }
-  for (i=0; i<5; i++){
+  for (byte i=0; i<5; i++){
     Serial.print(i); Serial.print(": ");
     Serial.print(sv_analog[i]);
     Serial.print(" {"); Serial.print(sv[i]); Serial.print("}\t");
@@ -167,7 +166,7 @@ void drive(byte spd_dir_index, float speed){
 */
 boolean all_black(){
   boolean black = true;
-  for (i=0; i<5; i++){
+  for (byte i=0; i<5; i++){
     black = black && sv[i];
   }
   return black;
@@ -177,7 +176,7 @@ boolean all_black(){
   Checks if at least one value of sv is true.
 */
 boolean one_black(){
-  for (i=0; i<5; i++){
+  for (byte i=0; i<5; i++){
     if (sv[i]) {
       return true;
     }
@@ -186,13 +185,12 @@ boolean one_black(){
 }
 
 /*
-  Get the tendancy of the sv_history
+  Get the tendancy of the sv_history.
 */
 byte get_tendancy(){
   byte counter[] = {0, 0, 0, 0, 0};
-  int i,j;
-  for (i=0; i<sizeof(long); i++) {
-    for (j=0; j<5; j++) {
+  for (byte i=0; i<sizeof(long); i++) {
+    for (byte j=0; j<5; j++) {
       counter[j] += ((sv_history[j] >> i) & true) ? 1 : 0;
       if (counter[0] && counter[1]) {
         return 0;
@@ -201,13 +199,7 @@ byte get_tendancy(){
       }
     }
   }
-  if (counter[1] && counter[2] && counter[1] > counter[2]) {
-    return 1;
-  } else if (counter[3] && counter[2] && counter[3] > counter[2]) {
-    return 3;
-  } else {
-    return 2;
-  }
+  return 2;
 }
 
 /*
@@ -231,16 +223,15 @@ void find_line_first(){
   If no sensor reacts, the state machine goes back to STATE:0 .
 */
 void follow_mid_sensor(){
-  for (i=0; i<5; i++){
-    index = RS_PRIO[i];
-    if (sv[index]) {
-      drive(index, SPD_DEF);
+  for (byte i=0; i<5; i++){
+    if (sv[RS_PRIO[i]]) {
+      drive(RS_PRIO[i], SPD_DEF);
       return;
     }
   }
-// If non of the RS values were true the robot did not see a line.
-// Now we check how the previous sensor values were set.
-// And switch therefore into the next state :)
+  // If non of the RS values were true the robot did not see a line.
+  // Now we check how the previous sensor values were set.
+  // And switch therefore into the next state :)
   state = 2;
 }
 
@@ -252,25 +243,14 @@ void follow_mid_sensor(){
   priority than the middle sensor.
 */
 void check_last_working(){
-//  First check whether we are back on track
+  //  First check whether we are back on track
   if (one_black()) {
     state = 1;
     return;
   }
 
-//  Otherwise head into the last working direction
-//  with vice-versa priorities.
-  // for (i=4; i>=0; i--){
-    // index = RS_PRIO[i];
-    // if (sv_lworking[index]) {
+  // Otherwise head into the latest tendency direction
   drive(get_tendancy(), SPD_DEF);
-  return;
-    // }
-  // }
-
-// If none of the last_working values was set
-// go back to the first state.
-  state = 0;
 }
 
 /*
@@ -295,7 +275,7 @@ void loop() {
   if (all_black()){
     state = 3;
   } else if (one_black()){
-    for (i=0; i<5; i++){
+    for (byte i=0; i<5; i++){
       sv_lworking[i] = sv[i];
     }
   }
@@ -322,4 +302,3 @@ void loop() {
       break;
   }
 }
-
